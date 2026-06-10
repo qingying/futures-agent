@@ -221,6 +221,56 @@ UserProfile = {
 | 交易规则 | 各交易所规章制度 | 低频 |
 | 历史问答 | 用户交互数据（经筛选） | 持续 |
 | 分析方法论 | 技术分析/基本面分析教材 | 低频 |
+| **用户自建知识库** | **用户自主上传** | **随时** |
+
+#### 4.2.4 用户自建知识库
+
+允许用户通过 Web 界面自主上传、管理知识库文档，实现个性化知识注入。
+
+**上传方式**：
+
+- **文件上传**：拖拽或选择文件上传
+- **文本粘贴**：直接粘贴文本内容
+- **URL 抓取**：输入网页 URL，自动抓取并解析内容
+- **批量导入**：支持 ZIP 批量上传
+
+**支持的文档格式**：
+
+| 格式类型 | 扩展名 | 解析策略 |
+|----------|--------|----------|
+| 纯文本 | `.txt`, `.md` | 直接读取 |
+| 文档 | `.pdf`, `.docx` | 提取文本 + 保留段落结构 |
+| 表格 | `.xlsx`, `.csv` | 结构化提取，按行/列分块 |
+| 网页 | `.html`, URL | 提取正文，过滤导航/广告 |
+
+**处理流程**：
+
+```
+上传 → 格式解析 → 文本清洗 → 智能分块 → 向量化 → 入库 → 状态展示
+  │         │          │          │         │       │        │
+  │         │          │          │         │       │        └─ 可见/可用/索引中
+  │         │          │          │         │       └─ ChromaDB collection
+  │         │          │          │         └─ embedding model (text-embedding-3-small)
+  │         │          │          └─ 语义分块 (500-1000 tokens, 50 overlap)
+  │         │          └─ 去除空白/特殊字符/乱码
+  │         └─ PyPDF2 / python-docx / openpyxl
+  └─ 校验: 大小 ≤50MB, 类型白名单
+```
+
+**知识库管理功能**：
+
+- **知识库列表**：按分类/标签/时间筛选
+- **文档管理**：查看、编辑、删除已上传文档
+- **索引状态**：显示每篇文档的向量化进度
+- **版本控制**：文档更新保留历史版本
+- **搜索预览**：在知识库内搜索，预览检索结果
+- **手动触发重索引**：当用户更换 embedding 模型时
+
+**隔离策略**：
+
+- **系统知识库**：管理员维护的基础知识，所有用户共享
+- **用户私有知识库**：仅创建者本人可见，回答时优先检索
+- **公开分享**：用户可选择将私有知识库公开给其他用户
 
 ---
 
@@ -262,6 +312,23 @@ UserProfile = {
 | 新闻资讯 | AkShare + 新浪财经 | REST API |
 | 持仓数据 | CFTC / 交易所 | REST API / 爬虫 |
 | 知识文档 | 手动整理 + 文档解析 | 向量化入库 |
+| 用户文档 | 用户上传（Web 界面） | 自动解析 + 向量化入库 |
+
+### 5.4 知识库管理 API
+
+| 接口 | 方法 | 描述 | 请求体 |
+|------|------|------|--------|
+| `/api/kb/collections` | GET | 获取知识库列表 | - |
+| `/api/kb/collections` | POST | 创建知识库 | `{name, description, visibility}` |
+| `/api/kb/collections/:id` | DELETE | 删除知识库 | - |
+| `/api/kb/collections/:id/docs` | GET | 获取文档列表 | - |
+| `/api/kb/collections/:id/docs` | POST | 上传文档 | `multipart/form-data` (文件) |
+| `/api/kb/collections/:id/docs/:docId` | GET | 查看文档详情 | - |
+| `/api/kb/collections/:id/docs/:docId` | PUT | 更新文档 | `{content}` (文本编辑) |
+| `/api/kb/collections/:id/docs/:docId` | DELETE | 删除文档 | - |
+| `/api/kb/collections/:id/docs/:docId/reindex` | POST | 手动重索引 | - |
+| `/api/kb/search` | POST | 搜索知识库 | `{query, collection_ids}` |
+| `/api/kb/url/fetch` | POST | URL 内容抓取 | `{url, collection_id}` |
 
 ---
 
@@ -274,8 +341,8 @@ UserProfile = {
 | **P0 - 基础搭建** | Week 1-2 | 项目骨架、LLM 接入、基础问答 |
 | **P1 - 记忆系统** | Week 3-4 | 三层记忆系统、用户画像 |
 | **P2 - 数据接入** | Week 5-6 | AkShare 行情接入、技术指标 |
-| **P3 - 知识库** | Week 7-8 | RAG 知识库、文档向量化 |
-| **P4 - Web 界面** | Week 9-10 | Chat UI、用户管理 |
+| **P3 - 知识库 + 用户上传** | Week 7-8 | RAG 知识库、文档上传/解析/向量化管线、KB 管理 UI |
+| **P4 - Web 界面** | Week 9-10 | Chat UI、用户管理、知识库管理 |
 | **P5 - 生产部署** | Week 11-12 | Docker 化、监控告警 |
 
 ### 6.2 项目结构
@@ -297,6 +364,13 @@ futures-agent/
 │   │   │   ├── short_term.py       # 短期记忆
 │   │   │   ├── long_term.py        # 长期记忆
 │   │   │   └── semantic.py         # 语义记忆 (RAG)
+│   │   ├── rag/                    # RAG 知识库管理
+│   │   │   ├── parser.py           # 文档解析器 (PDF/DOCX/XLSX/HTML)
+│   │   │   ├── chunker.py          # 智能分块策略
+│   │   │   ├── embedder.py         # 向量化引擎
+│   │   │   ├── store.py            # 向量存储 (ChromaDB)
+│   │   │   ├── retriever.py        # 检索器 (混合检索)
+│   │   │   └── kb_manager.py       # 知识库 CRUD
 │   │   ├── tools/                  # 工具集
 │   │   │   ├── quote.py            # 行情工具
 │   │   │   ├── indicator.py        # 指标计算
@@ -307,21 +381,36 @@ futures-agent/
 │   │   │   └── crawler/            # 交易所爬虫
 │   │   └── api/                    # FastAPI 路由
 │   │       ├── chat.py             # 对话接口
-│   │       └── user.py             # 用户管理
+│   │       ├── user.py             # 用户管理
+│   │       └── kb.py               # 知识库管理 API
 │   ├── requirements.txt
 │   └── Dockerfile
 ├── frontend/
 │   ├── app/                        # Next.js 应用
+│   │   ├── chat/                   # 对话页面
+│   │   ├── kb/                     # 知识库管理页面
+│   │   │   ├── page.tsx            # 知识库列表
+│   │   │   ├── upload/             # 上传文档
+│   │   │   └── [id]/               # 文档详情/编辑
+│   │   └── settings/               # 用户设置
 │   ├── components/
+│   │   ├── kb/
+│   │   │   ├── FileUploader.tsx    # 文件上传组件
+│   │   │   ├── UrlFetcher.tsx      # URL 抓取组件
+│   │   │   ├── TextEditor.tsx      # 文本粘贴编辑器
+│   │   │   ├── KbTable.tsx         # 知识库列表表格
+│   │   │   └── IndexProgress.tsx   # 索引进度指示器
+│   │   └── chat/
+│   │       └── ChatWindow.tsx      # 对话窗口
 │   ├── package.json
 │   └── Dockerfile
-├── knowledge-base/                 # 知识库原始文档
+├── knowledge-base/                 # 系统知识库原始文档
 │   ├── basics/                     # 基础知识
 │   ├── contracts/                  # 合约规格
 │   ├── rules/                      # 交易规则
 │   └── methods/                    # 分析方法论
 ├── scripts/
-│   ├── ingest_kb.py                # 知识库入库脚本
+│   ├── ingest_kb.py                # 系统知识库入库脚本
 │   └── crawl_contracts.py          # 合约信息爬取
 └── docker-compose.yml
 ```
@@ -336,6 +425,7 @@ futures-agent/
 | 行情数据延迟 | 回答不准确 | 多数据源备份 + 数据新鲜度检查 |
 | 记忆污染 | 用户画像偏差 | 定期审核 + 手动修正入口 |
 | 知识库过期 | 规则变更未同步 | 设置文档过期提醒机制 |
+| 用户上传低质/冲突内容 | 回答质量下降 | 文档质量评分 + 冲突检测 + 用户可关闭知识库 |
 | 合规风险 | 违反期货咨询规定 | 仅提供信息，不构成投资建议，用户协议明确 |
 
 ---
